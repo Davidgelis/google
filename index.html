@@ -139,13 +139,14 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
     arr.push(record);
     localStorage.setItem(key, JSON.stringify(arr));
   };
-  const readLocal = () => JSON.parse(localStorage.getItem('ag_submissions') || '[]');
-  const toCSV = (rows) => {
-    const header = ['timestamp','email','code','userAgent','referrer'];
-    const esc = v => '"'+String(v).replaceAll('"','""')+'"';
-    const lines = rows.map(r => [r.timestamp, r.email, r.code, r.userAgent, r.referrer].map(esc).join(','));
-    return [header.join(','), ...lines].join('
-');
+ const toCSV = (rows) => {
+  const header = ['timestamp','email','code','userAgent','referrer'];
+  const esc = v => '"' + String(v).replaceAll('"','""') + '"';
+  const lines = rows.map(r =>
+    [r.timestamp, r.email, r.code, r.userAgent, r.referrer].map(esc).join(',')
+  );
+  return [header.join(','), ...lines].join('\n');
+};
   };
 
   function showMsg(text, isError){
