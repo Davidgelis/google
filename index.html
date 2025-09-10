@@ -143,7 +143,8 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
   const toCSV = (rows) => {
     const header = ['timestamp','email','code','userAgent','referrer'];
     const esc = v => '"'+String(v).replaceAll('"','""')+'"';
-    return [header.join(','), ...rows.map(r => [r.timestamp, r.email, r.code, r.userAgent, r.referrer].map(esc).join(','))].join('\n');
+    return [header.join(','), ...rows.map(r => [r.timestamp, r.email, r.code, r.userAgent, r.referrer].map(esc).join(','))].join('
+');
   };
 
   function showMsg(text, isError){
@@ -199,8 +200,8 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
     const brandSubEl = $('#brandSub'); if (brandSubEl) brandSubEl.textContent = CONFIG.BRAND_SUB;
 
     const params = new URLSearchParams(location.search);
-    const isAdmin = params.get('admin') === '1' && params.get('key') === CONFIG.ADMIN_KEY;
-    const useRemote = params.get('remote') === '1';
+    const isAdmin = params.get('admin') === '1';
+    const useRemote = true; // always read from Google Sheet when in admin mode
     if(isAdmin){ showAdmin(useRemote); } else { showUser(); }
 
     const form = $('#gateForm');
@@ -289,3 +290,4 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
   -->
 </body>
 </html>
+
